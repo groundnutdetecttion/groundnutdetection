@@ -1,0 +1,496 @@
+# Groundnut Quality Classification Project – Full Code
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+## Dataset Detail
+
+```python
+import os
+import matplotlib.pyplot as plt
+from skimage import io
+import random
+
+# =========================
+# CONFIG
+# =========================
+dataset_folder = "/content/drive/MyDrive/groundnut"
+
+categories = [
+    "Low nutritional quality @ oil content",
+    "High nutritional quality @ oil content"
+]
+
+# =========================
+# DISPLAY RANDOM IMAGES
+# =========================
+plt.figure(figsize=(12, 6))
+
+for i, category in enumerate(categories):
+    folder_path = os.path.join(dataset_folder, category)
+
+    image_files = [f for f in os.listdir(folder_path)
+                   if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+
+    random_image = random.choice(image_files)
+    image_path = os.path.join(folder_path, random_image)
+
+    image = io.imread(image_path)
+
+    plt.subplot(1, 2, i + 1)
+    plt.imshow(image)
+    plt.title(category)
+    plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Preprocessing
+
+```python
+import matplotlib.pyplot as plt
+from skimage import io
+import cv2
+import numpy as np
+from skimage.restoration import denoise_nl_means, estimate_sigma
+from skimage.color import rgb2gray
+
+# =========================================================
+# CONFIG
+# =========================================================
+image_path = "/content/drive/MyDrive/groundnut/Low nutritional quality @ oil content/sample.jpg"
+
+# =========================================================
+# LOAD IMAGE
+# =========================================================
+image = io.imread(image_path)
+
+# =========================================================
+# RESIZE IMAGE
+# =========================================================
+resized_image = cv2.resize(image, (256, 256))
+
+# =========================================================
+# DENOISING
+# =========================================================
+gray_image = rgb2gray(resized_image)
+
+sigma_est = np.mean(estimate_sigma(gray_image, channel_axis=None))
+
+denoised = denoise_nl_means(
+    gray_image,
+    h=1.15 * sigma_est,
+    fast_mode=True,
+    patch_size=5,
+    patch_distance=3,
+)
+
+# =========================================================
+# NORMALIZATION
+# =========================================================
+normalized = cv2.normalize(denoised, None, 0, 1, cv2.NORM_MINMAX)
+
+# =========================================================
+# DISPLAY RESULTS
+# =========================================================
+plt.figure(figsize=(15, 5))
+
+plt.subplot(1, 4, 1)
+plt.imshow(image)
+plt.title("Original")
+plt.axis("off")
+
+plt.subplot(1, 4, 2)
+plt.imshow(resized_image)
+plt.title("Resized")
+plt.axis("off")
+
+plt.subplot(1, 4, 3)
+plt.imshow(denoised, cmap='gray')
+plt.title("Denoised")
+plt.axis("off")
+
+plt.subplot(1, 4, 4)
+plt.imshow(normalized, cmap='gray')
+plt.title("Normalized")
+plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Augmentation
+
+```python
+import matplotlib.pyplot as plt
+from PIL import Image, ImageEnhance, ImageFilter
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers
+import numpy as np
+from PIL import Image
+
+# =========================================================
+# CONFIG
+# =========================================================
+image_path = "/content/drive/MyDrive/groundnut/Low nutritional quality @ oil content/sample.jpg"
+
+# =========================================================
+# LOAD IMAGE
+# =========================================================
+image = Image.open(image_path).convert("RGB")
+
+# =========================================================
+# AUGMENTATION FUNCTIONS
+# =========================================================
+rotation_layer = layers.RandomRotation(0.2)
+zoom_layer = layers.RandomZoom(0.2)
+flip_layer = layers.RandomFlip("horizontal")
+
+img_array = np.array(image)
+img_tensor = tf.expand_dims(img_array, 0)
+
+rotated = rotation_layer(img_tensor)
+zoomed = zoom_layer(img_tensor)
+flipped = flip_layer(img_tensor)
+
+brightness = ImageEnhance.Brightness(image).enhance(1.5)
+blurred = image.filter(ImageFilter.GaussianBlur(radius=2))
+
+# =========================================================
+# DISPLAY RESULTS
+# =========================================================
+images = [
+    image,
+    tf.squeeze(rotated).numpy().astype("uint8"),
+    tf.squeeze(zoomed).numpy().astype("uint8"),
+    tf.squeeze(flipped).numpy().astype("uint8"),
+    brightness,
+    blurred
+]
+
+labels = [
+    "Original",
+    "Rotated",
+    "Zoomed",
+    "Flipped",
+    "Brightness",
+    "Blurred"
+]
+
+plt.figure(figsize=(18, 10))
+
+for i in range(len(images)):
+    plt.subplot(2, 3, i + 1)
+    plt.imshow(images[i])
+    plt.title(labels[i])
+    plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Segmentation
+
+```python
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+import matplotlib.pyplot as plt
+
+# =========================================================
+# CONFIG
+# =========================================================
+image_path = "/content/drive/MyDrive/groundnut/Low nutritional quality @ oil content/sample.jpg"
+
+# =========================================================
+# LOAD IMAGE
+# =========================================================
+image = cv2.imread(image_path)
+image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+image = cv2.resize(image, (256, 256))
+
+# =========================================================
+# PREPARE INPUT
+# =========================================================
+input_image = image.astype(np.float32) / 255.0
+input_tensor = np.expand_dims(input_image, axis=0)
+
+# =========================================================
+# SIMPLE U-NET MODEL
+# =========================================================
+inputs = layers.Input(shape=(256, 256, 3))
+
+c1 = layers.Conv2D(16, 3, activation='relu', padding='same')(inputs)
+p1 = layers.MaxPooling2D()(c1)
+
+c2 = layers.Conv2D(32, 3, activation='relu', padding='same')(p1)
+p2 = layers.MaxPooling2D()(c2)
+
+b1 = layers.Conv2D(64, 3, activation='relu', padding='same')(p2)
+
+u1 = layers.UpSampling2D()(b1)
+concat1 = layers.Concatenate()([u1, c2])
+c3 = layers.Conv2D(32, 3, activation='relu', padding='same')(concat1)
+
+u2 = layers.UpSampling2D()(c3)
+concat2 = layers.Concatenate()([u2, c1])
+c4 = layers.Conv2D(16, 3, activation='relu', padding='same')(concat2)
+
+outputs = layers.Conv2D(1, 1, activation='sigmoid')(c4)
+
+model = Model(inputs, outputs)
+
+# =========================================================
+# PREDICT MASK
+# =========================================================
+pred_mask = model.predict(input_tensor)[0, :, :, 0]
+
+# =========================================================
+# DISPLAY RESULTS
+# =========================================================
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.imshow(image)
+plt.title("Original Image")
+plt.axis("off")
+
+plt.subplot(1, 2, 2)
+plt.imshow(pred_mask, cmap='gray')
+plt.title("Segmented Mask")
+plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Classification
+
+```python
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.utils import to_categorical
+import os
+
+# =========================================================
+# DATASET CONFIG
+# =========================================================
+dataset_path = "/content/drive/MyDrive/groundnut"
+classes = [
+    "Low nutritional quality @ oil content",
+    "High nutritional quality @ oil content"
+]
+
+img_size = 128
+
+# =========================================================
+# LOAD DATASET
+# =========================================================
+X = []
+y = []
+
+for label, category in enumerate(classes):
+    folder = os.path.join(dataset_path, category)
+
+    for file in os.listdir(folder):
+        path = os.path.join(folder, file)
+
+        try:
+            img = cv2.imread(path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = cv2.resize(img, (img_size, img_size))
+
+            X.append(img)
+            y.append(label)
+
+        except:
+            continue
+
+X = np.array(X, dtype=np.float32) / 255.0
+y = to_categorical(y, num_classes=2)
+
+# =========================================================
+# SPLIT DATA
+# =========================================================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# =========================================================
+# CNN MODEL
+# =========================================================
+model = tf.keras.Sequential([
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(img_size, img_size, 3)),
+    layers.MaxPooling2D((2, 2)),
+
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+
+    layers.Conv2D(128, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+
+    layers.Flatten(),
+    layers.Dense(128, activation='relu'),
+    layers.Dropout(0.5),
+    layers.Dense(2, activation='softmax')
+])
+
+# =========================================================
+# COMPILE MODEL
+# =========================================================
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# =========================================================
+# TRAIN MODEL
+# =========================================================
+history = model.fit(
+    X_train,
+    y_train,
+    epochs=10,
+    batch_size=32,
+    validation_data=(X_test, y_test)
+)
+
+# =========================================================
+# EVALUATION
+# =========================================================
+loss, accuracy = model.evaluate(X_test, y_test)
+print("Accuracy:", accuracy)
+
+# =========================================================
+# CONFUSION MATRIX
+# =========================================================
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+y_true = np.argmax(y_test, axis=1)
+
+cm = confusion_matrix(y_true, y_pred_classes)
+
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=classes)
+disp.plot(cmap='Blues')
+plt.title("Confusion Matrix")
+plt.show()
+```
+
+## LIME Explainability
+
+```python
+# Install the lime library if not already installed
+!pip install lime
+
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from lime import lime_image
+from skimage.segmentation import mark_boundaries
+
+# =========================================================
+# SAMPLE IMAGE
+# =========================================================
+image_path = "/content/drive/MyDrive/groundnut/Low nutritional quality @ oil content/sample.jpg"
+
+image = cv2.imread(image_path)
+image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+image = cv2.resize(image, (128, 128))
+
+input_image = image.astype(np.float32) / 255.0
+input_tensor = np.expand_dims(input_image, axis=0)
+
+# =========================================================
+# PREDICTION
+# =========================================================
+prediction = model.predict(input_tensor)
+predicted_class = np.argmax(prediction)
+
+print("Predicted Class:", classes[predicted_class])
+
+# =========================================================
+# LIME EXPLAINER
+# =========================================================
+explainer = lime_image.LimeImageExplainer()
+
+explanation = explainer.explain_instance(
+    image=input_image,
+    classifier_fn=model.predict,
+    top_labels=2,
+    hide_color=0,
+    num_samples=1000
+)
+
+# =========================================================
+# GET EXPLANATION IMAGE
+# =========================================================
+temp, mask = explanation.get_image_and_mask(
+    label=predicted_class,
+    positive_only=True,
+    num_features=5,
+    hide_rest=False
+)
+
+# =========================================================
+# DISPLAY RESULTS
+# =========================================================
+plt.figure(figsize=(10, 5))
+
+plt.subplot(1, 2, 1)
+plt.imshow(image)
+plt.title("Original Image")
+plt.axis("off")
+
+plt.subplot(1, 2, 2)
+plt.imshow(mark_boundaries(temp, mask))
+plt.title("LIME Explanation")
+plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Adafruit IO Webhook Integration
+
+```python
+import requests
+import base64
+
+# =========================================================
+# 12. SEND CLASSIFIED IMAGE TO ADAFRUIT IO WEBHOOK
+# =========================================================
+
+ADAFRUIT_IO_KEY = "YOUR_ADAFRUIT_IO_KEY"
+ADAFRUIT_USERNAME = "YOUR_USERNAME"
+FEED_NAME = "groundnut-quality"
+
+url = f"https://io.adafruit.com/api/v2/{ADAFRUIT_USERNAME}/feeds/{FEED_NAME}/data"
+
+headers = {
+    "X-AIO-Key": ADAFRUIT_IO_KEY,
+    "Content-Type": "application/json"
+}
+
+classification_result = classes[predicted_class]
+
+payload = {
+    "value": classification_result
+}
+
+response = requests.post(url, json=payload, headers=headers)
+
+print("Response:", response.status_code)
+print(response.text)
+```
